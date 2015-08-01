@@ -1,0 +1,51 @@
+#!/bin/bash
+
+PACKAGE=$1
+shift
+
+if [ -z "$PACKAGE" ]; then
+    echo "missing package"
+    echo "Usage: gogetprivate <package>"
+    exit 1
+fi
+
+LAST_FAIL_PACKAGE=""
+
+ERRLOG=$(mktemp /tmp/gogetprivate-stderr.XXXXXX)
+function finish {
+    # cleanup error log
+    rm $ERRLOG
+}
+trap finish EXIT
+
+while true; do
+    go get $PACKAGE 2> >(tee $ERRLOG >&2)
+    RESULT=$?
+    if [ "$RESULT" == 0 ]; then
+        echo "All Done"
+        exit 0
+    fi
+
+    # Look for lines that look like this, and git clone them yourself.
+    # package bitbucket.org/myorg/mypackage: https://api.bitbucket.org/1.0/repositories/myorg/mypackage: 403 FORBIDDEN
+    FAIL_PACKAGE=$(grep "^package " $ERRLOG|grep "403 FORBIDDEN$"|grep "https://api.bitbucket.org/1.0/repositories/"|awk '{print $2}'|sed 's/://')
+
+    if [ ! -z "$FAIL_PACKAGE" ]; then
+        # Failed to download package using standard go get import. Try git cloning, transforming into:
+        # git clone git@bitbucket.org:myorg/mypackage $GOPATH/src/bitbucket.org/myorg/mypackage
+        echo "$FAIL_PACKAGE is forbidden. Trying git clone..."
+        GIT_PACKAGE=git@$(echo "$FAIL_PACKAGE"|sed 's#/#:#')
+        echo RUNNING: git clone $GIT_PACKAGE $GOPATH/src/$FAIL_PACKAGE
+        git clone $GIT_PACKAGE $GOPATH/src/$FAIL_PACKAGE
+    else
+        echo "Got failure I don't know how to handle."
+        exit 1
+    fi
+
+    if [ "$LAST_FAIL_PACKAGE" == "$FAIL_PACKAGE" ]; then
+        echo "Last failure repeated. Exiting to avoid loop."
+        exit 1
+    fi
+
+    LAST_FAIL_PACKAGE=$FAIL_PACKAGE
+done
