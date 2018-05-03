@@ -18,6 +18,8 @@ function finish {
 }
 trap finish EXIT
 
+git config --global url.ssh://git@bitbucket.org/.insteadOf https://bitbucket.org/
+
 while true; do
     go get $PACKAGE 2> >(tee $ERRLOG >&2)
     RESULT=$?
